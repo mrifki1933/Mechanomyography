@@ -1,0 +1,2 @@
+# Mechanomyography
+Pendeteksi kekuatan otot
