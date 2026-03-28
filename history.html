@@ -114,6 +114,8 @@ const demoSessions = [
 
 async function loadHistory() {
   let sessions = demoSessions;
+
+  // Coba ambil sesi dari localStorage
   try {
     const r = await API.getSessions();
     if (r.data && r.data.length > 0) sessions = r.data.map(s=>({
@@ -121,6 +123,32 @@ async function loadHistory() {
       amp: '—', cont: '—', status: s.avg_grip_pct>=85?'ok':s.avg_grip_pct>=65?'mid':'low'
     }));
   } catch {}
+
+  // Ambil data ThingSpeak feeds (data real sensor)
+  try {
+    const tsRes = await fetch(
+      `https://api.thingspeak.com/channels/3317158/feeds.json?api_key=LGHSJWKRW07LFBAW&results=30`
+    );
+    const tsJson = await tsRes.json();
+    if (tsJson.feeds && tsJson.feeds.length > 0) {
+      // Konversi ThingSpeak feeds → format sesi
+      const tsFeeds = tsJson.feeds.filter(f => f.field4);
+      if (tsFeeds.length > 0) {
+        sessions = tsFeeds.map((f, i) => ({
+          date:   f.created_at,
+          dur:    15 * (i + 1),
+          grip:   Math.round(parseFloat(f.field4 || 0)),
+          amp:    parseFloat(f.field1 || 0).toFixed(2),
+          cont:   parseInt(f.field6 || 0),
+          status: parseFloat(f.field4) >= 85 ? 'ok' : parseFloat(f.field4) >= 65 ? 'mid' : 'low'
+        })).reverse();
+        setAntaresStatus(true, 'ThingSpeak — data real ✓');
+      }
+    }
+  } catch(e) {
+    console.warn('[ThingSpeak History]', e.message);
+    setAntaresStatus(false, 'ThingSpeak offline — tampil data lokal');
+  }
 
   // Summary
   const grips = sessions.map(s=>s.grip||0).filter(Boolean);
@@ -153,8 +181,10 @@ function drawChart(sessions) {
   c.width = c.offsetWidth||800; c.height = c.offsetHeight||176;
   const ctx=c.getContext('2d'), W=c.width, H=c.height;
 
-  // Build 30-day grip data (simulasi degress lalu membaik)
-  const data=[88,85,82,80,78,75,72,70,68,65,63,60,59,62,65,63,61,64,67,68,70,72,69,65,62,65,63,61,59,62];
+  // Pakai data grip dari sessions (ThingSpeak atau demo)
+  const data = sessions.length >= 2
+    ? sessions.map(s => s.grip || 0).filter(Boolean).reverse()
+    : [88,85,82,80,78,75,72,70,68,65,63,60,59,62,65,63,61,64,67,68,70,72,69,65,62,65,63,61,59,62];
   const norm=calcNorm(user.gender,user.age,user.weight);
   const minNorm=norm.min;
 

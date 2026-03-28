@@ -2,7 +2,7 @@
 <html lang="id">
 <head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>MMG Live — MyoTrack</title>
+<title>MMG Live — Mechanomyography</title>
 <script src="shared.js"></script>
 <style>
 body::before{content:'';position:fixed;inset:0;background:radial-gradient(ellipse 55% 40% at 80% 15%,rgba(26,71,42,.06) 0,transparent 65%);pointer-events:none;}
@@ -322,33 +322,67 @@ async function toggleRec() {
   }
 }
 
-// ANIMATION
-let wo=0, gPct=58, fPct=35;
-(function loop() {
-  drawWave(document.getElementById('wc'),'#4aeaaa',wo); wo+=2;
-  if (Math.random()>.95) {
-    const a=+(2+Math.random()*1.5).toFixed(1), fr=Math.floor(30+Math.random()*15), r=+(a*.72).toFixed(1);
-    setText('lm-a',a); setText('lm-f',fr); setText('lm-r',r);
-    gPct=Math.max(25,Math.min(100,gPct+(Math.random()-.4)*2));
-    fPct=Math.max(10,Math.min(90,fPct+(Math.random()-.47)*1.5));
-    const gp=Math.round(gPct), fp=Math.round(fPct);
-    // Gauge
-    setText('g-val',gp+'%'); updateGauge('g-arc',gp);
-    const gs=document.getElementById('g-status');
-    if(gp>=85){gs.textContent='Normal';gs.className='g-status badge b-ok';}
-    else if(gp>=65){gs.textContent='⚠ Hampir Normal';gs.className='g-status badge b-warn';}
-    else{gs.textContent='Di Bawah Normal';gs.className='g-status badge b-err';}
-    setText('nr-you', (norm.avg*gp/100).toFixed(1)+' kgf');
-    // Fatigue
-    setText('fat-n',fp+'%'); document.getElementById('fat-b').style.width=fp+'%';
-    setText('fat-l',fp<40?'Otot segar — lanjutkan':fp<65?'Mulai lelah — perhatikan intensitas':'⚠ Istirahat disarankan segera');
-    // Contraction detection
-    if(a>3.0&&isRec){contCount++;setText('lm-c',contCount);buf.push({timestamp:new Date().toISOString(),amplitude:a,frequency:fr,rms:r});}
-    // Zone bars
-    zones.forEach((z,i)=>{z.pct=Math.max(5,Math.min(95,z.pct+(Math.random()-.5)*10));const f=document.getElementById('zf'+i),p=document.getElementById('zp'+i);if(f)f.style.width=Math.round(z.pct)+'%';if(p)p.textContent=Math.round(z.pct)+'%';});
-  }
-  requestAnimationFrame(loop);
+// ── WAVEFORM ANIMASI (selalu jalan) ──
+let wo = 0;
+(function waveLoop() {
+  drawWave(document.getElementById('wc'), '#4aeaaa', wo);
+  wo += 2;
+  requestAnimationFrame(waveLoop);
 })();
+
+// ── FUNGSI APPLY DATA KE UI ──
+let gPct = 58, fPct = 35;
+function applyData(a, fr, r, gp, fp) {
+  setText('lm-a', a); setText('lm-f', fr); setText('lm-r', r);
+  setText('g-val', gp + '%'); updateGauge('g-arc', gp);
+  const gs = document.getElementById('g-status');
+  if (gp >= 85)      { gs.textContent = 'Normal';          gs.className = 'g-status badge b-ok'; }
+  else if (gp >= 65) { gs.textContent = 'Hampir Normal';   gs.className = 'g-status badge b-warn'; }
+  else               { gs.textContent = 'Di Bawah Normal'; gs.className = 'g-status badge b-err'; }
+  setText('nr-you', (norm.avg * gp / 100).toFixed(1) + ' kgf');
+  setText('fat-n', fp + '%');
+  document.getElementById('fat-b').style.width = fp + '%';
+  setText('fat-l', fp < 40 ? 'Otot segar — lanjutkan' : fp < 65 ? 'Mulai lelah — perhatikan intensitas' : 'Istirahat disarankan segera');
+  zones.forEach((z, i) => {
+    z.pct = Math.max(5, Math.min(95, z.pct + (Math.random() - .5) * 8));
+    const f = document.getElementById('zf' + i), p = document.getElementById('zp' + i);
+    if (f) f.style.width = Math.round(z.pct) + '%';
+    if (p) p.textContent = Math.round(z.pct) + '%';
+  });
+}
+
+// ── POLLING DATA ANTARES (data real dari ESP32) ──
+const stopPolling = Antares.startPolling((data) => {
+  gPct = data.grip_pct; fPct = data.fatigue_pct;
+  setText('lm-c', data.kontraksi);
+  if (isRec) buf.push({ timestamp: new Date().toISOString(),
+    amplitude: data.amplitude, frequency: data.frequency, rms: data.rms });
+  applyData(data.amplitude.toFixed(2), data.frequency.toFixed(1),
+    data.rms.toFixed(2), Math.round(data.grip_pct), Math.round(data.fatigue_pct));
+  setAntaresStatus(true, 'ThingSpeak — data real dari sensor ✓');
+}, 3000);
+
+// ── FALLBACK SIMULASI (jika ESP32 belum kirim data) ──
+setTimeout(async () => {
+  const check = await Antares.fetchLatest();
+  if (!check) {
+    setAntaresStatus(false, 'Simulasi — ThingSpeak belum menerima data');
+    setInterval(() => {
+      if (Math.random() > .7) {
+        const a  = +(2 + Math.random() * 1.5).toFixed(2);
+        const fr = (30 + Math.random() * 15).toFixed(1);
+        const r  = +(a * .72).toFixed(2);
+        gPct = Math.max(25, Math.min(100, gPct + (Math.random() - .4) * 2));
+        fPct = Math.max(10, Math.min(90,  fPct + (Math.random() - .47) * 1.5));
+        if (parseFloat(a) > 3.0 && isRec) {
+          contCount++; setText('lm-c', contCount);
+          buf.push({ timestamp: new Date().toISOString(), amplitude: a, frequency: fr, rms: r });
+        }
+        applyData(a, fr, r, Math.round(gPct), Math.round(fPct));
+      }
+    }, 200);
+  }
+}, 4000);
 
 // CALIBRATION
 function openCal() {

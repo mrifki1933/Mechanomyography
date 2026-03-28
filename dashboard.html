@@ -248,19 +248,33 @@ function renderAlerts(alerts, grip, fat) {
 
 loadDash();
 
-// Watch wave animation
-let wo = 0, amp = 2.4, fat2 = 42;
+// ── WATCH WAVE ANIMASI (selalu jalan) ──
+let wo = 0;
 (function loop() {
   drawWave(document.getElementById('wfwc'), 'rgba(74,234,170,.8)', wo);
   wo += 1.5;
-  if (Math.random() > .95) {
-    amp = +(2 + Math.random()*1.5).toFixed(1);
-    fat2 = Math.max(15, Math.min(85, fat2+(Math.random()-.47)*2));
-    setText('wf-amp', amp); setText('wf-frq', Math.floor(30+Math.random()*15));
-    setText('wf-fat', 'FAT '+Math.round(fat2)+'%');
-  }
   requestAnimationFrame(loop);
 })();
+
+// ── THINGSPEAK: update watch preview & metrik dari data real ──
+Antares.startPolling((data) => {
+  // Watch preview
+  setText('wf-amp', data.amplitude.toFixed(1));
+  setText('wf-frq', data.frequency.toFixed(0));
+  setText('wf-grp', Math.round(data.grip_pct));
+  setText('wf-fat', 'FAT ' + Math.round(data.fatigue_pct) + '%');
+  // Metrik bawah
+  applyMetrics(Math.round(data.grip_pct), Math.round(data.fatigue_pct));
+  setAntaresStatus(true, 'ThingSpeak — data real sensor ✓');
+}, 15000);
+
+// Cek jika ThingSpeak belum ada data → tetap simulasi
+setTimeout(async () => {
+  const check = await Antares.fetchLatest();
+  if (!check) {
+    setAntaresStatus(false, 'Simulasi — ThingSpeak belum menerima data');
+  }
+}, 5000);
 </script>
 </body>
 </html>
